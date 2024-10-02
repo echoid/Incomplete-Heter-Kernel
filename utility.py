@@ -1,0 +1,135 @@
+import os
+import numpy as np
+import json
+
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, normalized_mutual_info_score, adjusted_rand_score
+from sklearn.decomposition import KernelPCA
+from sklearn.cluster import KMeans
+from sklearn.model_selection import StratifiedKFold
+from tqdm import tqdm
+from mass_model import run_impk
+
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import SimpleImputer, IterativeImputer
+
+# Converts column info into stats for handling different data types
+def stats_convert(dataset):
+    column_info = load_data_stats(dataset)
+    if all(col == "numerical" for col in column_info.values()):
+        return None
+
+    stats = {"attribute": []}
+    for column_name, column in column_info.items():
+        col_dic = {'type': 'Numeric' if column == "numerical" else ''}
+        if isinstance(column, dict):
+            key = next(iter(column))
+            if key in {"ordinal", "nominal"}:
+                col_dic['type'] = key.capitalize()
+                col_dic['values'] = list(column[key].values())
+        stats["attribute"].append(col_dic)
+    return stats
+
+# Main function to run models on datasets with missing data
+def run(dataset, missing_type, model, missing_rates, y, clustering=False):
+    na_path = f"dataset_nan/{dataset}/{missing_type}/"
+    missing_rates = missing_rates or [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    
+    # Load column info if needed for certain models
+    if model in ["mpk", "impk"] and not clustering:
+        data_stats = stats_convert(dataset)
+    elif model in ["impk", "impk_KPCA"] and clustering:
+        data_stats = load_data_stats(dataset)
+    else:
+        data_stats = None
+
+    all_results = {}
+
+    if not clustering:
+        for rate in tqdm(missing_rates):
+            data_na = np.load(f"{na_path}{rate}.npy")
+            skf = StratifiedKFold(n_splits=5)
+            results_list = [run_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
+                            for trn, test in skf.split(data_na, y)]
+            all_results[rate] = aggregate_results(results_list)
+        return all_results
+
+    else:
+        data_na = np.load(f"dataset/{dataset}/feature.npy")
+        skf = StratifiedKFold(n_splits=5)
+        results_list = [run_clustering_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
+                        for trn, test in skf.split(data_na, y)]
+        return aggregate_results(results_list, clustering=True)
+
+# Loads column info JSON for specific datasets
+def load_data_stats(dataset):
+    with open(f"dataset/{dataset}/column_info.json", 'r') as file:
+        return json.load(file)
+
+# Runs a model for a classification task
+def run_model(model, X_train, X_test, y_train, y_test, data_stats):
+    if model == "PMK":
+        train, test = run_impk(X_train, X_test, data_stats)
+        return SVC_evaluation(train, y_train, test, y_test, kernel="precomputed")
+
+    elif model == "PMK_KPCA":
+        train, test = run_impk(X_train, X_test, data_stats)
+        train, test = KernelPCA_with_precomputed(train, test)
+        return SVC_evaluation(train, y_train, test, y_test, kernel="linear")
+
+# Runs KernelPCA with precomputed kernel
+def KernelPCA_with_precomputed(train, test):
+    kpca = KernelPCA(kernel='precomputed')
+    return kpca.fit_transform(train), kpca.transform(test)
+
+# Evaluates an SVC model and returns accuracy and F1 score
+def SVC_evaluation(X_train, y_train, X_test, y_test, kernel="rbf"):
+    svc = SVC(C=1, kernel=kernel)
+    svc.fit(X_train, y_train)
+    y_pred = svc.predict(X_test)
+    return {
+        "accuracy": accuracy_score(y_test, y_pred),
+        "f1_score": f1_score(y_test, y_pred, average='macro')
+    }
+
+# Aggregates the results from multiple folds
+def aggregate_results(results_list, clustering=False):
+    if not clustering:
+        avg_accuracy = np.mean([res['accuracy'] for res in results_list])
+        avg_f1_score = np.mean([res['f1_score'] for res in results_list])
+        return {
+            "avg_accuracy": avg_accuracy,
+            "std_accuracy": np.std([res['accuracy'] for res in results_list]),
+            "avg_f1_score": avg_f1_score,
+            "std_f1_score": np.std([res['f1_score'] for res in results_list])
+        }
+    else:
+        avg_kmeans_nmi = np.mean([res['KMeans_nmi'] for res in results_list])
+        avg_kmeans_ari = np.mean([res['KMeans_ari'] for res in results_list])
+        return {
+            "avg_kmeans_nmi": avg_kmeans_nmi,
+            "std_kmeans_nmi": np.std([res['KMeans_nmi'] for res in results_list]),
+            "avg_kmeans_ari": avg_kmeans_ari,
+            "std_kmeans_ari": np.std([res['KMeans_ari'] for res in results_list])
+        }
+
+# Runs a clustering model
+def run_clustering_model(model, X_train, X_test, y_train, y_test, data_stats):
+    if model == "impk":
+        train, test = run_impk(X_train, X_test, data_stats)
+        return clustering_evaluation(train, y_train, test, y_test)
+
+    elif model == "impk_KPCA":
+        train, test = run_impk(X_train, X_test, data_stats)
+        train, test = KernelPCA_with_precomputed(train, test)
+        return clustering_evaluation(train, y_train, test, y_test)
+
+# Evaluates clustering using KMeans and returns NMI and ARI scores
+def clustering_evaluation(X_train, y_train, X_test, y_test):
+    kmeans = KMeans(n_clusters=len(np.unique(y_train)))
+    kmeans.fit(X_train)
+    y_pred_kmeans = kmeans.predict(X_test)
+    return {
+        "KMeans_nmi": normalized_mutual_info_score(y_test, y_pred_kmeans),
+        "KMeans_ari": adjusted_rand_score(y_test, y_pred_kmeans)
+    }
