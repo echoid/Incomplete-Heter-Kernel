@@ -11,6 +11,7 @@ class EqualFrequencyDiscretizer(object):
         self.n_dim = len(data[0])
         self.bin_cuts = [[] for i in range(self.n_dim)]
         self.bin_counts = [[] for i in range(self.n_dim)]
+        self.miss_counts = [[] for i in range(self.n_dim)]
         self.data_bin_ids = np.array([[-1 for i in range(self.n_dim)] for i in range(self.n_data)])
         #self.data_bin_ids = np.full((self.n_data, self.n_dim), np.nan)  # Initialize with NaN values
         self.num_bins = [0 for i in range(self.n_dim)]
@@ -20,11 +21,13 @@ class EqualFrequencyDiscretizer(object):
                 column_data = data[:, i]  # looking at each column
                 # Filter out NaN values from the column
                 temp = column_data[~np.isnan(column_data)]
+                
                 b_cuts, b_counts = self.equal_freq_histograms(temp, nbins)  # rebuild the distribution using the non-missing data
             else:
-                # todo
+                num_missing = np.sum(np.isnan(column_data))
                 b_cuts, b_counts = self.equal_freq_histograms_non_numeric(data[:, i], i)
-
+            num_missing = np.sum(np.isnan(data[:, i]))
+            self.miss_counts[i] = num_missing # mass in missing_bin
             self.bin_cuts[i] = b_cuts
             self.bin_counts[i] = b_counts
             self.num_bins[i] = len(b_counts)
@@ -37,7 +40,7 @@ class EqualFrequencyDiscretizer(object):
                     self.data_bin_ids[j, i] = int(data[j, i])
 
     def get_bin_cuts_counts(self):
-        return self.bin_cuts, self.bin_counts
+        return self.bin_cuts, self.bin_counts, self.miss_counts
 
     def get_num_bins(self):
         return self.num_bins

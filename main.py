@@ -8,11 +8,11 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run tests on heart, kidney, and mammo datasets with impkKPCA and impk models")
 
-    parser.add_argument('--datasets', nargs='+', choices=["heart", "kidney", "mammo"],
-                        default=["heart"],  # Set "heart" as the default dataset
+    parser.add_argument('--datasets', nargs='+', choices=["australian", "kidney", "mammo"],
+                        default=["australian"],  # Set "heart" as the default dataset
                         help='List of datasets to run tests on (heart, kidney, mammo)')
 
-    parser.add_argument('--models', nargs='+', choices=["PMK_KPCA", "PMK"],
+    parser.add_argument('--models', nargs='+', choices=["PMK"],
                         default=["PMK"],  # Set "impk" as the default model
                         help='List of models to run tests with (PMK, PMK_KPCA)')
 

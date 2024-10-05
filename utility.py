@@ -33,15 +33,11 @@ def stats_convert(dataset):
 # Main function to run models on datasets with missing data
 def run(dataset, missing_type, model, missing_rates, y, clustering=False):
     na_path = f"dataset_nan/{dataset}/{missing_type}/"
-    missing_rates = missing_rates or [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-    
-    # Load column info if needed for certain models
-    if model in ["mpk", "impk"] and not clustering:
-        data_stats = stats_convert(dataset)
-    elif model in ["impk", "impk_KPCA"] and clustering:
+
+    if clustering:
         data_stats = load_data_stats(dataset)
     else:
-        data_stats = None
+        data_stats = stats_convert(dataset)
 
     all_results = {}
 
@@ -51,14 +47,16 @@ def run(dataset, missing_type, model, missing_rates, y, clustering=False):
             skf = StratifiedKFold(n_splits=5)
             results_list = [run_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
                             for trn, test in skf.split(data_na, y)]
+
             all_results[rate] = aggregate_results(results_list)
         return all_results
 
     else:
         data_na = np.load(f"dataset/{dataset}/feature.npy")
-        skf = StratifiedKFold(n_splits=5)
-        results_list = [run_clustering_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
-                        for trn, test in skf.split(data_na, y)]
+        results_list = []
+        for i in range(5):
+            result = run_clustering_model(model, data_na, data_na, y, y, data_stats)
+            results_list.append(result)
         return aggregate_results(results_list, clustering=True)
 
 # Loads column info JSON for specific datasets
@@ -115,21 +113,20 @@ def aggregate_results(results_list, clustering=False):
 
 # Runs a clustering model
 def run_clustering_model(model, X_train, X_test, y_train, y_test, data_stats):
-    if model == "impk":
+    if model == "PMK":
         train, test = run_impk(X_train, X_test, data_stats)
-        return clustering_evaluation(train, y_train, test, y_test)
 
-    elif model == "impk_KPCA":
-        train, test = run_impk(X_train, X_test, data_stats)
-        train, test = KernelPCA_with_precomputed(train, test)
-        return clustering_evaluation(train, y_train, test, y_test)
+        result = clustering_evaluation(train, y_train, test, y_test)
+        return result
+
 
 # Evaluates clustering using KMeans and returns NMI and ARI scores
 def clustering_evaluation(X_train, y_train, X_test, y_test):
     kmeans = KMeans(n_clusters=len(np.unique(y_train)))
     kmeans.fit(X_train)
     y_pred_kmeans = kmeans.predict(X_test)
-    return {
+    result = {
         "KMeans_nmi": normalized_mutual_info_score(y_test, y_pred_kmeans),
         "KMeans_ari": adjusted_rand_score(y_test, y_pred_kmeans)
     }
+    return result

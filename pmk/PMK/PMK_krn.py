@@ -4,7 +4,7 @@ import numpy as np
 
 try:
     import pymp
-    pymp_found = True
+    pymp_found = False
 except ImportError as e:
     pymp_found = False
 
@@ -64,7 +64,7 @@ class PMK_Kernel:
 
         self.dimVec_ = np.array([i for i in range(self.ndim_)])
         self.discretiser_ = EqualFrequencyDiscretizer(train, self.nbins_, self.stats_)
-        self.bin_cuts_, self.bin_counts_ = self.discretiser_.get_bin_cuts_counts()
+        self.bin_cuts_, self.bin_counts_,self.miss_counts_ = self.discretiser_.get_bin_cuts_counts()
         self.num_bins_ = self.discretiser_.get_num_bins()
         self.bin_dissimilarities_ = get_bin_dissimilarity()
 
@@ -79,52 +79,68 @@ class PMK_Kernel:
         self.nbins_ = nbins
 
     def transform(self, train, test=None):
+        def cal_dissimilarity(mass):  
+
+            if mass is None or mass == 0:
+                raise ValueError("Mass cannot be None or zero for calculating dissimilarity.")
+            
+            # Calculate the probability mass
+            prob_mass = mass / self.ndata_
+            # Return the log of the probability mass
+            return np.log(prob_mass)
 
         def re_assign_bin(index, ref_bin):
             bin_count = self.bin_counts_[index]
-            
             # Check if stats is valid and type is "Numeric" or "Ordinal"
             if (self.stats_ is None) or (self.stats_["attribute"][index]["type"] in ["Numeric", "Ordinal"]):
 
-                # Bins less than or equal to ref_bin
                 left_bins = bin_count[:int(ref_bin) + 1]
                 # Bins greater than or equal to ref_bin
                 right_bins = bin_count[int(ref_bin):]
                 
-                # Calculate the total number of data points on each side
-                left_total = sum(left_bins)
-                right_total = sum(right_bins)
-
-                # Find which side has more data and return appropriate bin index
-                if left_total > right_total:
-                    return 0  # Assign to the leftmost bin (0 index)
+                mass_left = sum(left_bins)
+                mass_right = sum(right_bins)
+                if mass_left > mass_right:
+                    return 0  , mass_left
                 else:
-                    return len(bin_count) - 1  # Assign to the rightmost bin
+                    return len(bin_count) - 1 , mass_left
             else:
-                # For Nominal types, assign to the bin with the most data
                 max_bin = np.argmax(bin_count)
-                return max_bin  # Return the index of the bin with the most data
+
+                
+                return max_bin, bin_count[max_bin]
 
 
 
         def convert(imput_x,index_x, imput_y,index_y):
             x_bin_ids = imput_x[index_x] # imput row
             y_bin_ids = imput_y[index_y] # imput row
+            total_mass = None
             # Check if -1 exists in either x_bin_ids or y_bin_ids
             if -1 in x_bin_ids or -1 in y_bin_ids:
+                total_mass = None
                 for col, x_bin_id in enumerate(x_bin_ids):
-                    if x_bin_id == -1 and y_bin_ids[col] == -1:
+                    if x_bin_id == -1 and y_bin_ids[col] == -1: # both missing
+                        missing_mass = self.miss_counts_[col]
+                        if (self.stats_ is None) or (self.stats_["attribute"][col]["type"] in ["Numeric", "Ordinal"]):
+                            total_mass = self.ndata_ + missing_mass
+                        else:
+                            total_mass = (np.max(self.bin_counts_[col])) + missing_mass
                         y_bin_ids[col] = self.nbins_
                         x_bin_ids[col] = 0
                     elif x_bin_id == -1: # if X_bin id is missing
-                        x_bin_ids[col] = re_assign_bin(col, y_bin_ids[col])
-                    elif y_bin_ids[col] == -1: # if X_bin id is missing
-                        y_bin_ids[col]= re_assign_bin(col, x_bin_ids[col])
-                return x_bin_ids, y_bin_ids
+                        new_id, max_mass = re_assign_bin(col, y_bin_ids[col])
+                        x_bin_ids[col] = new_id
+                        total_mass = max_mass + missing_mass
+                    elif y_bin_ids[col] == -1: # if y_bin id is missing
+                        new_id, max_mass = re_assign_bin(col, x_bin_ids[col])
+                        y_bin_ids[col]= new_id
+                        total_mass = max_mass + missing_mass
+                return x_bin_ids, y_bin_ids, total_mass
             else:
-                return x_bin_ids, y_bin_ids
+                return x_bin_ids, y_bin_ids, total_mass
 
-        def dissimilarity(x_bin_ids, y_bin_ids):
+        def dissimilarity(x_bin_ids, y_bin_ids, total_mass):
             len_x, len_y = len(x_bin_ids), len(y_bin_ids)
 
             # check the vector size
@@ -142,15 +158,16 @@ class PMK_Kernel:
 
                 with pymp.Parallel() as p1:
                     for i in p1.range(len(train)):
-                        temp_train_i, temp_train_j = convert(train,i, train,i)
+                        temp_train_i, temp_train_j,total_mass = convert(train,i, train,i)
                         x_x[i] = dissimilarity(temp_train_i, temp_train_j)
+                        
 
                 with pymp.Parallel() as p1:
 #                    with pymp.Parallel() as p2:
                         for i in p1.range(len(train)):
                             for j in range(i, len(train)):
-                                temp_train_i, temp_train_j = convert(train,i, train,j)
-                                x_y = dissimilarity(temp_train_i, temp_train_j)
+                                temp_train_i, temp_train_j,total_mass = convert(train,i, train,j)
+                                x_y = dissimilarity(temp_train_i, temp_train_j, total_mass)
                                 d[i][j] = (2.0 * x_y) / (x_x[i] + x_x[j])
                                 d[j][i] = d[i][j]
                         
@@ -161,20 +178,19 @@ class PMK_Kernel:
                 # Parallel computation of y_y (self-dissimilarity of test set)
                 with pymp.Parallel() as p1:
                     for i in p1.range(len(test)):
-                        y_y[i] = dissimilarity(test[i], test[i])
+                        total_mass = None 
+                        y_y[i] = dissimilarity(test[i], test[i], total_mass)
 
                 # Parallel computation of d matrix (train vs test dissimilarity)
                 with pymp.Parallel() as p1:
                     for i in p1.range(len(train)):
                         # Convert train[i] only once, outside the inner loop
-                        temp_train_i, temp_train_j = convert(train,i, train,i)
-                        x_x = dissimilarity(temp_train_i, temp_train_j)
-
+                        temp_train_i, temp_train_j,total_mass = convert(train,i, train,i)
+                        x_x = dissimilarity(temp_train_i, temp_train_j,total_mass )
                         for j in range(len(test)):  # No need for additional parallelism here
                             # Convert only train[i] and test[j] for cross-dissimilarity
-                            temp_train, temp_test = convert(train,i, test,j)
-                            x_y = dissimilarity(temp_train, temp_test)
-
+                            temp_train, temp_test,total_mass = convert(train,i, test,j)
+                            x_y = dissimilarity(temp_train, temp_test,total_mass )
                             # Update the shared dissimilarity matrix
                             d[i][j] = (2.0 * x_y) / (x_x + y_y[j])
                 
@@ -184,13 +200,14 @@ class PMK_Kernel:
                 x_x = [0.0 for i in range(len(train))]
 
                 for i in range(len(train)):
-                    train[i], train[i] = convert(train,i, train,i) 
-                    x_x[i] = dissimilarity(train[i], train[i])
+                    train[i], train[i],total_mass = convert(train,i, train,i) 
+                    total_mass = None
+                    x_x[i] = dissimilarity(train[i], train[i],total_mass)
 
                 for i in range(len(train)):
                     for j in range(i, len(train)):
-                        train[i], train[j] = convert(train,i, train,j) 
-                        x_y = dissimilarity(train[i], train[j])
+                        train[i], train[j],total_mass = convert(train,i, train,j) 
+                        x_y = dissimilarity(train[i], train[j],total_mass)
 
                         d[i][j] = (2.0 * x_y) / (x_x[i] + x_x[j])
                         d[j][i] = d[i][j]
@@ -198,20 +215,20 @@ class PMK_Kernel:
                 d = np.empty((len(train), len(test)))
                 y_y = [0.0 for i in range(len(test))]
                 for i in range(len(test)):
-                    temp_test_i, temp_test_j = convert(test,i, test,i) 
-                    y_y[i] = dissimilarity(temp_test_i, temp_test_j)
+                    temp_test_i, temp_test_j,total_mass = convert(test,i, test,i) 
+                    y_y[i] = dissimilarity(temp_test_i, temp_test_j,total_mass)
 
                 for i in range(len(train)):
                     # Precompute dissimilarities for the train set using converted values
-                    temp_train_i, temp_train_j = convert(train,i,train,i)
-                    x_x = dissimilarity(temp_train_i, temp_train_j)
+                    temp_train_i, temp_train_j,total_mass = convert(train,i,train,i)
+                    x_x = dissimilarity(temp_train_i, temp_train_j,total_mass)
 
                     for j in range(len(test)):
                         # Convert train[i] and test[j] once for the cross-dissimilarity
-                        temp_train, temp_test = convert(train,i, test,j)
+                        temp_train, temp_test,total_mass = convert(train,i, test,j)
                         
                         # Compute cross-dissimilarity
-                        x_y = dissimilarity(temp_train, temp_test)
+                        x_y = dissimilarity(temp_train, temp_test,total_mass)
 
                         # Update d[i][j] using the precomputed self-dissimilarities
                         d[i][j] = (2.0 * x_y) / (x_x + y_y[j])
