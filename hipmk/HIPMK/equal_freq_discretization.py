@@ -24,7 +24,7 @@ class EqualFrequencyDiscretizer(object):
                 
                 b_cuts, b_counts = self.equal_freq_histograms(temp, nbins)  # rebuild the distribution using the non-missing data
             else:
-                num_missing = np.sum(np.isnan(column_data))
+                #num_missing = np.sum(np.isnan(column_data))
                 b_cuts, b_counts = self.equal_freq_histograms_non_numeric(data[:, i], i)
             num_missing = np.sum(np.isnan(data[:, i]))
             self.miss_counts[i] = num_missing # mass in missing_bin

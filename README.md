@@ -15,7 +15,7 @@ The model (`PMK`) is specifically designed to handle heterogeneous data types an
 To run classification tasks on the heart dataset using a missing rate of 5%:
 
 
-```python main.py --datasets australian --models PMK --missing_types mcar --missing_rates 0.01```
+```python main.py --datasets australian --missing_types mcar --missing_rates 0.1```
 
 
 ## Running Clustering Tasks

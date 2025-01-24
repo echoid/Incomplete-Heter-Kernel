@@ -12,9 +12,9 @@ def main():
                         default=["australian"],  # Set "heart" as the default dataset
                         help='List of datasets to run tests on (heart, kidney, mammo)')
 
-    parser.add_argument('--models', nargs='+', choices=["PMK"],
-                        default=["PMK"],  # Set "impk" as the default model
-                        help='List of models to run tests with (PMK, PMK_KPCA)')
+    parser.add_argument('--models', nargs='+', choices=["HIPMK"],
+                        default=["HIPMK"],  # Set "impk" as the default model
+                        help='List of models to run tests with (HIPMK, HIPMK_KPCA)')
 
     parser.add_argument('--missing_types', nargs='+', choices=["mcar", "mar", "mnar"],
                         default=["mcar"],  # Set "mcar" as the default missing type
@@ -35,11 +35,12 @@ def main():
     missing_rates = args.missing_rates
     clustering = any(dataset in ["kidney", "mammo"] for dataset in datasets)
 
+
+
     for dataset in datasets:
         # Load data for the current dataset
         path = f"dataset/{dataset}/"
         y = np.load(path + "label.npy")
-
         # Iterate through each model and missing type
         for missing_type in missing_types:
             for model in models:

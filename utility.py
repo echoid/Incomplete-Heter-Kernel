@@ -7,11 +7,8 @@ from sklearn.metrics import accuracy_score, f1_score, normalized_mutual_info_sco
 from sklearn.decomposition import KernelPCA
 from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedKFold
-from tqdm import tqdm
-from mass_model import run_impk
+from mass_model import run_hipmk
 
-from sklearn.experimental import enable_iterative_imputer
-from sklearn.impute import SimpleImputer, IterativeImputer
 
 # Converts column info into stats for handling different data types
 def stats_convert(dataset):
@@ -39,10 +36,11 @@ def run(dataset, missing_type, model, missing_rates, y, clustering=False):
     else:
         data_stats = stats_convert(dataset)
 
+
     all_results = {}
 
     if not clustering:
-        for rate in tqdm(missing_rates):
+        for rate in missing_rates:
             data_na = np.load(f"{na_path}{rate}.npy")
             skf = StratifiedKFold(n_splits=5)
             results_list = [run_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
@@ -66,12 +64,12 @@ def load_data_stats(dataset):
 
 # Runs a model for a classification task
 def run_model(model, X_train, X_test, y_train, y_test, data_stats):
-    if model == "PMK":
-        train, test = run_impk(X_train, X_test, data_stats)
+    if model == "HIPMK":
+        train, test = run_hipmk(X_train, X_test, data_stats)
         return SVC_evaluation(train, y_train, test, y_test, kernel="precomputed")
 
-    elif model == "PMK_KPCA":
-        train, test = run_impk(X_train, X_test, data_stats)
+    elif model == "HIPMK_KPCA":
+        train, test = run_hipmk(X_train, X_test, data_stats)
         train, test = KernelPCA_with_precomputed(train, test)
         return SVC_evaluation(train, y_train, test, y_test, kernel="linear")
 
@@ -114,7 +112,7 @@ def aggregate_results(results_list, clustering=False):
 # Runs a clustering model
 def run_clustering_model(model, X_train, X_test, y_train, y_test, data_stats):
     if model == "PMK":
-        train, test = run_impk(X_train, X_test, data_stats)
+        train, test = run_hipmk(X_train, X_test, data_stats)
 
         result = clustering_evaluation(train, y_train, test, y_test)
         return result

@@ -12,7 +12,7 @@ except ImportError as e:
 from .equal_freq_discretization import EqualFrequencyDiscretizer
 
 
-class PMK_Kernel:
+class HIPMK_Kernel:
     def __init__(self, nbins = None, stats = None):
         self.nbins_ = nbins
         self.stats_ = stats
