@@ -4,7 +4,6 @@ import json
 
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, normalized_mutual_info_score, adjusted_rand_score
-from sklearn.decomposition import KernelPCA
 from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedKFold
 from mass_model import run_hipmk
@@ -42,7 +41,7 @@ def run(dataset, missing_type, model, missing_rates, y, clustering=False):
     if not clustering:
         for rate in missing_rates:
             data_na = np.load(f"{na_path}{rate}.npy")
-            skf = StratifiedKFold(n_splits=5)
+            skf = StratifiedKFold(n_splits=2)
             results_list = [run_model(model, data_na[trn], data_na[test], y[trn], y[test], data_stats)
                             for trn, test in skf.split(data_na, y)]
 
@@ -52,8 +51,9 @@ def run(dataset, missing_type, model, missing_rates, y, clustering=False):
     else:
         data_na = np.load(f"dataset/{dataset}/feature.npy")
         results_list = []
-        for i in range(5):
+        for i in range(1):
             result = run_clustering_model(model, data_na, data_na, y, y, data_stats)
+            print(result)
             results_list.append(result)
         return aggregate_results(results_list, clustering=True)
 
@@ -64,19 +64,10 @@ def load_data_stats(dataset):
 
 # Runs a model for a classification task
 def run_model(model, X_train, X_test, y_train, y_test, data_stats):
-    if model == "HIPMK":
-        train, test = run_hipmk(X_train, X_test, data_stats)
-        return SVC_evaluation(train, y_train, test, y_test, kernel="precomputed")
 
-    elif model == "HIPMK_KPCA":
-        train, test = run_hipmk(X_train, X_test, data_stats)
-        train, test = KernelPCA_with_precomputed(train, test)
-        return SVC_evaluation(train, y_train, test, y_test, kernel="linear")
+    train, test = run_hipmk(X_train, X_test, data_stats)
+    return SVC_evaluation(train, y_train, test, y_test, kernel="precomputed")
 
-# Runs KernelPCA with precomputed kernel
-def KernelPCA_with_precomputed(train, test):
-    kpca = KernelPCA(kernel='precomputed')
-    return kpca.fit_transform(train), kpca.transform(test)
 
 # Evaluates an SVC model and returns accuracy and F1 score
 def SVC_evaluation(X_train, y_train, X_test, y_test, kernel="rbf"):
@@ -111,11 +102,10 @@ def aggregate_results(results_list, clustering=False):
 
 # Runs a clustering model
 def run_clustering_model(model, X_train, X_test, y_train, y_test, data_stats):
-    if model == "PMK":
-        train, test = run_hipmk(X_train, X_test, data_stats)
+    train, test = run_hipmk(X_train, X_test, data_stats)
 
-        result = clustering_evaluation(train, y_train, test, y_test)
-        return result
+    result = clustering_evaluation(train, y_train, test, y_test)
+    return result
 
 
 # Evaluates clustering using KMeans and returns NMI and ARI scores
